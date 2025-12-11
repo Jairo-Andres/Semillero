@@ -10,6 +10,8 @@ class PlanningTaskEntity {
   final DateTime endDate;
   final int jobId;
   final int orderId;
+  final bool isSetup;
+  final bool isRest;
 
   PlanningTaskEntity({
     required this.sequenceId,
@@ -22,5 +24,7 @@ class PlanningTaskEntity {
     required this.retarded,
     required this.orderId,
     required this.jobId,
+    this.isSetup = false,
+    this.isRest = false,
   });
 }

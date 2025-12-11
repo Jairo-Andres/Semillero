@@ -184,6 +184,7 @@ class FlexibleJobShopAdapter {
               retarded: false,
               jobId: job.jobId!,
               orderId: orderId,
+              isSetup: true,
             ),
           );
         }
@@ -223,6 +224,7 @@ class FlexibleJobShopAdapter {
             retarded: false,
             jobId: 0,
             orderId: orderId,
+            isRest: true,
           ),
         );
       }

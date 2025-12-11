@@ -419,7 +419,7 @@ class _GanttChartState extends State<GanttChart> {
     for (int i = 0; i < widget.machines.length; i++) {
       final machine = widget.machines[i];
       for (final task in machine.tasks) {
-        if (!_jobColor.containsKey(task.jobId)) {
+        if (!task.isRest && !_jobColor.containsKey(task.jobId)) {
           final random = Random();
           _jobColor[task.jobId] = Color.fromARGB(
             255,
@@ -428,7 +428,12 @@ class _GanttChartState extends State<GanttChart> {
             random.nextInt(256),
           );
         }
-        final color = _jobColor[task.jobId]!;
+
+        final color = task.isRest
+            ? Colors.grey.shade600
+            : task.isSetup
+                ? Colors.orange.shade400
+                : _jobColor[task.jobId]!;
 
         final top = (i * (40.0 * _verticalZoom)) + (5 * i);
         final left = _calculateTaskLeft(task.startDate, chartWidth);
