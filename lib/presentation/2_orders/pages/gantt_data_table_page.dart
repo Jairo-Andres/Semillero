@@ -266,8 +266,9 @@ class _TaskTable extends StatelessWidget {
                 cells: [
                   DataCell(Text(row.machineName)),
                   DataCell(Text('Job ${task.jobId}')),
-                  DataCell(Text('${task.sequenceName} #${task.numberProcess}')),
-                  DataCell(Text('${task.displayName}')),
+                  DataCell(
+                    Text('${task.sequenceName} #${task.numberProcess}'),
+                  ),
                   DataCell(Text(dateFormatter.format(task.startDate))),
                   DataCell(Text(dateFormatter.format(task.endDate))),
                   DataCell(Text('$durationMinutes')),
