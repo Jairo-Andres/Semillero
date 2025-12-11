@@ -174,9 +174,9 @@ class FlexibleJobShopAdapter {
         if (setupRange != null) {
           planningMachine.tasks.add(
             PlanningTaskEntity(
-              sequenceId: sequence.id!,
-              sequenceName: 'Alistamiento',
-              displayName: 'Alistamiento',
+              sequenceId: 0,
+              sequenceName: 'alistamiento',
+              displayName: 'alistamiento',
               taskId: task.id!,
               numberProcess: taskId,
               startDate: setupRange.start,
@@ -233,13 +233,27 @@ class FlexibleJobShopAdapter {
     }
 
 
-    // Calcular métricas
-    final List<Tuple4<DateTime, DateTime, DateTime, int>> jobsDates = [];
-    for (final out in output) {
-      final job = order.orderJobs!.firstWhere((j) => j.jobId == out.jobId);
-      jobsDates
-          .add(Tuple4(out.startDate, out.endTime, out.dueDate, job.priority));
+    // Calcular métricas utilizando los bloques visibles (incluyendo alistamientos)
+    final Map<int, List<PlanningTaskEntity>> jobTasks = {};
 
+    for (final machine in planningMachines) {
+      for (final task in machine.tasks) {
+        if (task.jobId == 0) continue; // Descansos u otros bloques auxiliares
+        jobTasks.putIfAbsent(task.jobId, () => []).add(task);
+      }
+    }
+
+    final List<Tuple4<DateTime, DateTime, DateTime, int>> jobsDates = [];
+    for (final entry in jobTasks.entries) {
+      final tasks = entry.value;
+      tasks.sort((a, b) => a.startDate.compareTo(b.startDate));
+
+      final job = order.orderJobs!.firstWhere((j) => j.jobId == entry.key);
+      final start = tasks.first.startDate;
+      final end = tasks.map((t) => t.endDate)
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+
+      jobsDates.add(Tuple4(start, end, job.dueDate, job.priority));
     }
 
     final metrics = getMetricts(
