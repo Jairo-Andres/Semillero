@@ -21,10 +21,11 @@ class FlexibleJobOutput {
   final DateTime startDate;
   final DateTime endTime;
   final Map<int, Tuple2<int, Range>> scheduling;
+  final Map<int, Range?> setupScheduling;
 
 
-  FlexibleJobOutput(
-      this.jobId, this.dueDate, this.startDate, this.endTime, this.scheduling);
+  FlexibleJobOutput(this.jobId, this.dueDate, this.startDate, this.endTime,
+      this.scheduling, this.setupScheduling);
 }
 
 class FlexibleJobShop {
@@ -38,6 +39,7 @@ class FlexibleJobShop {
   Map<int, int> machineProcessedCount = {};
   final Map<int, Map<int?, Map<int, Duration>>> changeoverMatrix;
   final Map<int, int?> _machineLastSequence = {};
+  final Map<int, List<Range>> machineRestScheduling = {};
   List<FlexibleJobOutput> output = [];
 
   FlexibleJobShop(
@@ -55,6 +57,7 @@ class FlexibleJobShop {
     // Inicializar contador de procesamiento por máquina
     for (final machineId in machinesAvailability.keys) {
       machineProcessedCount[machineId] = 0;
+      machineRestScheduling[machineId] = [];
     }
     _initializeMachineLastSequence();
 
@@ -314,6 +317,10 @@ class FlexibleJobShop {
       for (var job in inputJobs) job.jobId: {},
     };
 
+    Map<int, Map<int, Range?>> jobSetupSchedulings = {
+      for (var job in inputJobs) job.jobId: {},
+    };
+
     Map<int, DateTime> jobAvailability = {
       for (var job in inputJobs) job.jobId: job.availableDate,
     };
@@ -370,21 +377,33 @@ class FlexibleJobShop {
       });
 
       final selected = candidates.first;
-      final start = selected.earliestStart;
+      final start = _nextAvailableStart(
+        selected.machineId,
+        selected.earliestStart,
+      );
 
       // Calcular tiempo de alistamiento
       final int? previousSequence =
           _machineLastSequence.putIfAbsent(selected.machineId, () => null);
       final Duration setupDuration = _getSetupDuration(
           selected.machineId, selected.job.sequenceId, previousSequence);
-      final Duration totalDuration = selected.duration + setupDuration;
+      final Range? setupRange = setupDuration > Duration.zero
+          ? Range(
+              start,
+              _adjustEndTimeWithInactivities(
+                  selected.machineId, start, start.add(setupDuration)),
+            )
+          : null;
 
-      final end = start.add(totalDuration);
-      final adjustedEnd =
-          _adjustEndTimeWithInactivities(selected.machineId, start, end);
+      final DateTime processingStart = setupRange?.end ?? start;
+
+      final processingEnd = _adjustEndTimeWithInactivities(
+          selected.machineId,
+          processingStart,
+          processingStart.add(selected.duration));
 
       // Aplicar descanso por continueCapacity
-      DateTime finalEnd = adjustedEnd;
+      DateTime finalEnd = processingEnd;
       final capacity = machineContinueCapacity[selected.machineId] ?? 0;
       final restTime = machineRestTime[selected.machineId];
 
@@ -394,15 +413,20 @@ class FlexibleJobShop {
 
         if (machineProcessedCount[selected.machineId]! >= capacity) {
           // Aplicar descanso
-          finalEnd = adjustedEnd.add(restTime);
+          final restEnd = _adjustEndTimeWithInactivities(
+              selected.machineId, processingEnd, processingEnd.add(restTime));
+          final restRange = Range(processingEnd, restEnd);
+          machineRestScheduling[selected.machineId]?.add(restRange);
+          finalEnd = restEnd;
           machineProcessedCount[selected.machineId] = 0;
         }
       }
       jobSchedulings[selected.job.jobId]![selected.taskId] =
-          Tuple2(selected.machineId, Range(start, adjustedEnd));
+          Tuple2(selected.machineId, Range(processingStart, processingEnd));
+      jobSetupSchedulings[selected.job.jobId]![selected.taskId] = setupRange;
 
       machinesAvailability[selected.machineId] = finalEnd;
-      jobAvailability[selected.job.jobId] = adjustedEnd;
+      jobAvailability[selected.job.jobId] = processingEnd;
       jobOperationIndex[selected.job.jobId] =
           (jobOperationIndex[selected.job.jobId] ?? 0) + 1;
       _machineLastSequence[selected.machineId] = selected.job.sequenceId;
@@ -410,10 +434,15 @@ class FlexibleJobShop {
 
     for (var job in inputJobs) {
       final sched = jobSchedulings[job.jobId]!;
+      final setupSched = jobSetupSchedulings[job.jobId]!;
 
-      final start = sched.values
-          .map((t) => t.value2.start)
-          .reduce((a, b) => a.isBefore(b) ? a : b);
+      final start = [
+        ...sched.values.map((t) => t.value2.start),
+        ...setupSched.values
+            .where((range) => range != null)
+            .map((range) => range!.start),
+      ].reduce((a, b) => a.isBefore(b) ? a : b);
+
       final end = sched.values
           .map((t) => t.value2.end)
           .reduce((a, b) => a.isAfter(b) ? a : b);
@@ -423,6 +452,7 @@ class FlexibleJobShop {
         start,
         end,
         sched,
+        setupSched,
       ));
     }
   }
@@ -538,6 +568,28 @@ class FlexibleJobShop {
           workingStart.minute);
     }
     return start;
+  }
+
+  DateTime _nextAvailableStart(int machineId, DateTime start) {
+    DateTime current = _adjustForWorkingSchedule(start);
+    while (true) {
+      final inactivities = _getInactivitiesForDay(machineId, current);
+
+      // If current time falls inside an inactivity, jump to its end
+      final conflict = inactivities.firstWhere(
+        (inactivity) =>
+            current.isBefore(inactivity.end) &&
+            !current.isBefore(inactivity.start),
+        orElse: () => Range(current, current),
+      );
+
+      if (conflict.start == conflict.end) {
+        return current;
+      }
+
+      final adjusted = conflict.end;
+      current = _adjustForWorkingSchedule(adjusted);
+    }
   }
 
   DateTime _adjustEndTimeForWorkingSchedule(DateTime start, DateTime end) {

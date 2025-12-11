@@ -10,17 +10,21 @@ import 'package:production_planning/repositories/interfaces/machine_repository.d
 import 'package:production_planning/repositories/interfaces/order_repository.dart';
 import 'package:production_planning/services/adapters/metrics.dart';
 import 'package:production_planning/services/algorithms/flexible_job_shop.dart';
+import 'package:production_planning/services/setup_time_service.dart';
 import 'package:production_planning/shared/functions/functions.dart';
+import 'package:production_planning/shared/types/rnage.dart';
 import '../../shared/utils/task_time_utils.dart';
 
 
 class FlexibleJobShopAdapter {
   final OrderRepository orderRepository;
   final MachineRepository machineRepository;
+  final SetupTimeService setupTimeService;
 
   FlexibleJobShopAdapter({
     required this.orderRepository,
     required this.machineRepository,
+    required this.setupTimeService,
   });
 
   int toInt(dynamic value) {
@@ -109,8 +113,16 @@ class FlexibleJobShopAdapter {
     }
 
 
+    // Obtener la matriz de changeover (tiempos de alistamiento)
+    final changeoverMatrixResult =
+        await setupTimeService.buildChangeoverMatrix();
+    final changeoverMatrix = changeoverMatrixResult.fold(
+      (_) => const <int, Map<int?, Map<int, Duration>>>{},
+      (matrix) => matrix,
+    );
+
     // Ejecutar el algoritmo Flexible Job Shop
-    final output = FlexibleJobShop(
+    final scheduler = FlexibleJobShop(
       order.regDate,
       Tuple2(START_SCHEDULE, END_SCHEDULE),
       inputJobs,
@@ -120,8 +132,10 @@ class FlexibleJobShopAdapter {
       machineInactivities: machineInactivitiesMap,
       machineContinueCapacity: machineContinueCapacityMap,
       machineRestTime: machineRestTimeMap,
+      changeoverMatrix: changeoverMatrix,
 
-    ).output;
+    );
+    final output = scheduler.output;
 
     // Transformar la salida en PlanningMachineEntity
     final List<PlanningMachineEntity> planningMachines = [];
@@ -146,13 +160,33 @@ class FlexibleJobShopAdapter {
         final taskId = taskEntry.key;
         final machineId = taskEntry.value.value1;
         final timeRange = taskEntry.value.value2;
-
+        final setupRange = out.setupScheduling[taskId];
 
         final task = sequence.tasks!.firstWhere((t) => t.id == taskId);
 
         final displayName = current == 1
             ? (job.sequence?.name ?? sequence.name)
             : '${job.sequence?.name ?? sequence.name}.${current - 1}';
+
+        final planningMachine =
+            planningMachines.firstWhere((m) => m.machineId == machineId);
+
+        if (setupRange != null) {
+          planningMachine.tasks.add(
+            PlanningTaskEntity(
+              sequenceId: sequence.id!,
+              sequenceName: 'Alistamiento',
+              displayName: 'Alistamiento',
+              taskId: task.id!,
+              numberProcess: taskId,
+              startDate: setupRange.start,
+              endDate: setupRange.end,
+              retarded: false,
+              jobId: job.jobId!,
+              orderId: orderId,
+            ),
+          );
+        }
 
         final planningTask = PlanningTaskEntity(
           sequenceId: sequence.id!,
@@ -167,10 +201,35 @@ class FlexibleJobShopAdapter {
           orderId: orderId,
         );
 
-        final planningMachine =
-            planningMachines.firstWhere((m) => m.machineId == machineId);
         planningMachine.tasks.add(planningTask);
       }
+    }
+
+    // Agregar descansos automáticos como bloques visibles en el diagrama
+    scheduler.machineRestScheduling.forEach((machineId, rests) {
+      final planningMachine =
+          planningMachines.firstWhere((m) => m.machineId == machineId);
+      int restIndex = 0;
+      for (final Range rest in rests) {
+        planningMachine.tasks.add(
+          PlanningTaskEntity(
+            sequenceId: 0,
+            sequenceName: 'Descanso',
+            displayName: 'Descanso',
+            taskId: 0,
+            numberProcess: restIndex++,
+            startDate: rest.start,
+            endDate: rest.end,
+            retarded: false,
+            jobId: 0,
+            orderId: orderId,
+          ),
+        );
+      }
+    });
+
+    for (final machine in planningMachines) {
+      machine.tasks.sort((a, b) => a.startDate.compareTo(b.startDate));
     }
 
 

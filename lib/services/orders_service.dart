@@ -246,7 +246,9 @@ class OrdersService {
           .flexibleFlowShopAdapter(sch.value1, sch.value2)),
 
       'FLEXIBLE JOB SHOP' => Right(await FlexibleJobShopAdapter(
-              machineRepository: machineRepo, orderRepository: orderRepo)
+              machineRepository: machineRepo,
+              orderRepository: orderRepo,
+              setupTimeService: setupTimeService)
           .flexibleJobShopAdapter(sch.value1, sch.value2)),
 
       'OPEN SHOP' => Right(await OpenShopAdapter(
